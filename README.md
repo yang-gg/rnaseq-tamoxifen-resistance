@@ -42,7 +42,7 @@ bash scripts/02_download_fastq.sh
 python scripts/03_make_samplesheet.py
 
 nextflow run nf-core/rnaseq -r 3.14.0 -profile singularity -params-file nextflow/params.yaml
-# on a Slurm cluster add: -c nextflow/slurm.config
+# on a Slurm cluster (e.g. Spartan) use instead: sbatch scripts/run_nfcore.slurm
 
 Rscript -e 'rmarkdown::render("analysis/DE_analysis.Rmd")'
 ```

@@ -15,3 +15,6 @@ results/nfcore/
 __pycache__/
 analysis/*_cache/
 analysis/*_files/
+logs/
+.singularity_cache/
+nextflow/samplesheet.csv
