@@ -23,26 +23,47 @@ dir.create("results/tables", showWarnings = FALSE, recursive = TRUE)
 
 ## 1. Data
 
-Gene-level counts from nf-core/rnaseq (Salmon), annotated with cell line and condition.
+Transcript-level quantification from Salmon (run on [Galaxy Australia](https://usegalaxy.org.au) against GENCODE v46 transcripts), summarised to genes with tximport.
 
 ```{r load}
-counts_tbl <- read_tsv("results/nfcore/salmon/salmon.merged.gene_counts.tsv", show_col_types = FALSE)
-gene_names <- counts_tbl |> select(gene_id, gene_name)
-counts <- counts_tbl |> select(-gene_id, -gene_name) |> as.matrix() |> round()
-rownames(counts) <- counts_tbl$gene_id
+library(tximport)
 
-info <- read_csv("metadata/sample_info.csv", show_col_types = FALSE) |>
+# Sample annotation (from GEO) joined to SRA run accessions (from SRA Run Selector)
+samples <- read_csv("metadata/samples_geo.csv", show_col_types = FALSE)
+runs <- read_csv("metadata/SraRunTable.csv", show_col_types = FALSE) |>
+  select(run = Run, gsm = `Sample Name`)
+info_runs <- inner_join(runs, samples, by = "gsm") |>
   mutate(condition = factor(condition, levels = c("parental", "resistant")),
-         cell_line = factor(cell_line)) |>
-  column_to_rownames("sample")
-counts <- counts[, rownames(info)]
-info
+         cell_line = factor(cell_line))
+stopifnot(n_distinct(info_runs$gsm) == 11)
+
+# One Salmon quant file per run, named by its SRR accession (e.g. data/salmon/SRRxxxxxxx.tabular)
+files <- list.files("data/salmon", pattern = "^SRR[0-9]+", full.names = TRUE)
+names(files) <- str_extract(basename(files), "^SRR[0-9]+")
+files <- files[info_runs$run]
+stopifnot(!anyNA(files))
+
+# GENCODE transcript names look like ENST...|ENSG...|...|tx_name|gene_name|length|biotype|
+tx_names <- read_tsv(files[1], show_col_types = FALSE)$Name
+stopifnot(all(str_detect(tx_names, fixed("|"))))
+tx2gene <- tibble(tx = tx_names) |>
+  separate_wider_delim(tx, "|", names = c(NA, "gene_id", NA, NA, NA, "gene_name"),
+                       too_many = "drop", cols_remove = FALSE)
+gene_names <- distinct(tx2gene, gene_id, gene_name)
+
+txi <- tximport(files, type = "salmon", tx2gene = select(tx2gene, tx, gene_id))
+info <- info_runs |> column_to_rownames("run")
+info |> select(gsm, title, cell_line, condition)
 ```
 
 ## 2. Exploratory analysis
 
 ```{r eda}
-dds <- DESeqDataSetFromMatrix(counts, info, design = ~ cell_line + condition)
+dds <- DESeqDataSetFromTximport(txi, info, design = ~ cell_line + condition)
+# Merge sequencing runs that belong to the same GEO sample
+if (anyDuplicated(info$gsm)) dds <- collapseReplicates(dds, groupby = info$gsm, run = rownames(info))
+colnames(dds) <- make.names(colData(dds)$title)
+info <- as.data.frame(colData(dds))
 dds <- dds[rowSums(counts(dds) >= 10) >= 3, ]
 vsd <- vst(dds, blind = TRUE)
 
@@ -117,7 +138,7 @@ length(Reduce(intersect, sets))
 ## 5. Pathway analysis (GSEA, MSigDB Hallmark)
 
 ```{r gsea}
-h <- msigdbr(species = "Homo sapiens", category = "H")
+h <- msigdbr(species = "Homo sapiens", collection = "H")
 hallmark <- split(h$gene_symbol, h$gs_name)
 # Rank genes by the Wald statistic (lfcShrink output has no stat column)
 ranks_all <- results(dds, name = "condition_resistant_vs_parental") |> as.data.frame() |>

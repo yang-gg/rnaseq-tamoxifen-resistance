@@ -1,15 +1,13 @@
+# Optional: conda environment with the same R packages as scripts/install_packages.R
 name: rnaseq-tamres
 channels:
   - conda-forge
   - bioconda
 dependencies:
-  - python=3.11
-  - pandas
-  - nextflow
   - r-base=4.3
-  - r-rmarkdown
-  - r-here
   - r-tidyverse
+  - r-here
+  - r-rmarkdown
   - r-pheatmap
   - r-ggrepel
   - r-msigdbr
@@ -18,5 +16,4 @@ dependencies:
   - bioconductor-limma
   - bioconductor-apeglm
   - bioconductor-fgsea
-  - bioconductor-clusterprofiler
-  - bioconductor-org.hs.eg.db
+  - bioconductor-tximport

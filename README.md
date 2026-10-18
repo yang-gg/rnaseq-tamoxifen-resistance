@@ -21,11 +21,19 @@ Which genes and pathways change consistently when ER-positive breast cancer cell
 
 ## Workflow
 
-1. `scripts/01_get_metadata.sh`: fetch run metadata from ENA
-2. `scripts/02_download_fastq.sh`: download FASTQ files and check MD5 sums
-3. `scripts/03_make_samplesheet.py`: build the nf-core samplesheet and sample annotation
-4. [nf-core/rnaseq](https://nf-co.re/rnaseq) (Nextflow): QC, trimming and Salmon quantification against GENCODE v46
-5. `analysis/DE_analysis.Rmd`: exploratory analysis, DESeq2 with a paired design (`~ cell_line + condition`), comparison with edgeR and limma-voom, and GSEA on MSigDB Hallmark gene sets
+**Upstream, on [Galaxy Australia](https://usegalaxy.org.au)** (a public bioinformatics platform):
+
+1. Import FASTQ files from SRA (`fasterq-dump`)
+2. Quality control with FastQC, adapter and quality trimming with fastp, summary with MultiQC
+3. Transcript quantification with Salmon against GENCODE v46 human transcripts
+
+**Downstream, in R** (`analysis/DE_analysis.Rmd`):
+
+1. Gene-level summarisation with tximport
+2. Exploratory analysis (VST, PCA, sample clustering)
+3. Differential expression with DESeq2 using a paired design (`~ cell_line + condition`), with apeglm log fold change shrinkage
+4. Comparison with edgeR (quasi-likelihood) and limma-voom
+5. Gene set enrichment (fgsea, MSigDB Hallmark)
 
 ## Results
 
@@ -33,17 +41,12 @@ _Coming soon: PCA, volcano plot, top genes, enriched pathways and interpretation
 
 ## Reproduce
 
+1. Run the Galaxy steps above and download one Salmon `quant.sf` per run into `data/salmon/`, named by SRA run accession (e.g. `data/salmon/SRRxxxxxxx.tabular`).
+2. Download the run table from the [SRA Run Selector](https://www.ncbi.nlm.nih.gov/Traces/study/?acc=SRP133519) to `metadata/SraRunTable.csv`.
+3. Install the R packages and render the report:
+
 ```bash
-conda env create -f environment.yml
-conda activate rnaseq-tamres
-
-bash scripts/01_get_metadata.sh
-bash scripts/02_download_fastq.sh
-python scripts/03_make_samplesheet.py
-
-nextflow run nf-core/rnaseq -r 3.14.0 -profile singularity -params-file nextflow/params.yaml
-# on a Slurm cluster (e.g. Spartan) use instead: sbatch scripts/run_nfcore.slurm
-
+Rscript scripts/install_packages.R
 Rscript -e 'rmarkdown::render("analysis/DE_analysis.Rmd")'
 ```
 
@@ -56,8 +59,7 @@ Rscript -e 'rmarkdown::render("analysis/DE_analysis.Rmd")'
 
 ```
 ├── analysis/      R Markdown analysis
-├── metadata/      run and sample tables
-├── nextflow/      nf-core parameters and cluster config
+├── metadata/      sample annotation (GEO) and run table (SRA)
 ├── results/       figures and tables (raw data is not tracked)
-└── scripts/       data download and preparation
+└── scripts/       package installation
 ```

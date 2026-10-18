@@ -1,20 +1,12 @@
-# Raw and intermediate data (re-create with scripts/)
+# Raw and intermediate data (Salmon outputs are downloaded from Galaxy)
 data/
 *.fastq.gz
 *.fq.gz
 *.bam
-*.bai
-work/
-.nextflow*
-results/nfcore/
 
-# R / Python
+# R
 .Rhistory
 .RData
 .Rproj.user/
-__pycache__/
 analysis/*_cache/
 analysis/*_files/
-logs/
-.singularity_cache/
-nextflow/samplesheet.csv
