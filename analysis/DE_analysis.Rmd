@@ -1,0 +1,141 @@
+---
+title: "Tamoxifen resistance in ER+ breast cancer cell lines (GSE111151)"
+output:
+  html_document:
+    toc: true
+    code_folding: hide
+---
+
+```{r setup, message=FALSE}
+knitr::opts_knit$set(root.dir = here::here())
+library(tidyverse)
+library(here)
+library(DESeq2)
+library(edgeR)
+library(limma)
+library(pheatmap)
+library(ggrepel)
+library(fgsea)
+library(msigdbr)
+dir.create("results/figures", showWarnings = FALSE, recursive = TRUE)
+dir.create("results/tables", showWarnings = FALSE, recursive = TRUE)
+```
+
+## 1. Data
+
+Gene-level counts from nf-core/rnaseq (Salmon), annotated with cell line and condition.
+
+```{r load}
+counts_tbl <- read_tsv("results/nfcore/salmon/salmon.merged.gene_counts.tsv", show_col_types = FALSE)
+gene_names <- counts_tbl |> select(gene_id, gene_name)
+counts <- counts_tbl |> select(-gene_id, -gene_name) |> as.matrix() |> round()
+rownames(counts) <- counts_tbl$gene_id
+
+info <- read_csv("metadata/sample_info.csv", show_col_types = FALSE) |>
+  mutate(condition = factor(condition, levels = c("parental", "resistant")),
+         cell_line = factor(cell_line)) |>
+  column_to_rownames("sample")
+counts <- counts[, rownames(info)]
+info
+```
+
+## 2. Exploratory analysis
+
+```{r eda}
+dds <- DESeqDataSetFromMatrix(counts, info, design = ~ cell_line + condition)
+dds <- dds[rowSums(counts(dds) >= 10) >= 3, ]
+vsd <- vst(dds, blind = TRUE)
+
+pca <- plotPCA(vsd, intgroup = c("cell_line", "condition"), returnData = TRUE)
+pv <- round(100 * attr(pca, "percentVar"))
+p_pca <- ggplot(pca, aes(PC1, PC2, colour = cell_line, shape = condition)) +
+  geom_point(size = 3) +
+  labs(x = paste0("PC1 (", pv[1], "%)"), y = paste0("PC2 (", pv[2], "%)")) +
+  theme_bw()
+ggsave("results/figures/pca.png", p_pca, width = 6, height = 4.5)
+p_pca
+```
+
+Cell line is expected to dominate PC1; the paired design (`~ cell_line + condition`) removes that effect so the test focuses on resistance.
+
+## 3. Differential expression (DESeq2)
+
+```{r deseq2}
+dds <- DESeq(dds)
+res <- lfcShrink(dds, coef = "condition_resistant_vs_parental", type = "apeglm")
+res_tbl <- as.data.frame(res) |> rownames_to_column("gene_id") |>
+  left_join(gene_names, by = "gene_id") |> arrange(padj)
+write_csv(res_tbl, "results/tables/DESeq2_resistant_vs_parental.csv")
+sig <- filter(res_tbl, padj < 0.05, abs(log2FoldChange) > 1)
+nrow(sig)
+```
+
+```{r volcano}
+p_vol <- res_tbl |> filter(!is.na(padj)) |>
+  mutate(sig = padj < 0.05 & abs(log2FoldChange) > 1) |>
+  ggplot(aes(log2FoldChange, -log10(padj), colour = sig)) +
+  geom_point(size = 0.8, alpha = 0.6) +
+  geom_text_repel(data = ~ head(filter(.x, sig), 15), aes(label = gene_name), size = 3, colour = "black") +
+  scale_colour_manual(values = c("grey70", "firebrick")) +
+  theme_bw() + theme(legend.position = "none")
+ggsave("results/figures/volcano.png", p_vol, width = 6, height = 5)
+p_vol
+```
+
+```{r heatmap}
+top <- head(sig$gene_id, 50)
+mat <- assay(vsd)[top, ]
+mat <- mat - rowMeans(mat)
+rownames(mat) <- gene_names$gene_name[match(rownames(mat), gene_names$gene_id)]
+pheatmap(mat, annotation_col = info[, c("cell_line", "condition")],
+         filename = "results/figures/top50_heatmap.png", width = 7, height = 9)
+```
+
+## 4. Method comparison (edgeR, limma-voom)
+
+```{r compare}
+design <- model.matrix(~ cell_line + condition, data = info)
+y <- DGEList(counts(dds))
+y <- calcNormFactors(y)
+
+y <- estimateDisp(y, design)
+fit_e <- glmQLFit(y, design)
+edger <- topTags(glmQLFTest(fit_e, coef = "conditionresistant"), n = Inf)$table
+
+v <- voom(y, design)
+limma_res <- topTable(eBayes(lmFit(v, design)), coef = "conditionresistant", number = Inf)
+
+sets <- list(
+  DESeq2 = sig$gene_id,
+  edgeR  = rownames(edger)[edger$FDR < 0.05 & abs(edger$logFC) > 1],
+  limma  = rownames(limma_res)[limma_res$adj.P.Val < 0.05 & abs(limma_res$logFC) > 1]
+)
+sapply(sets, length)
+length(Reduce(intersect, sets))
+```
+
+## 5. Pathway analysis (GSEA, MSigDB Hallmark)
+
+```{r gsea}
+h <- msigdbr(species = "Homo sapiens", category = "H")
+hallmark <- split(h$gene_symbol, h$gs_name)
+# Rank genes by the Wald statistic (lfcShrink output has no stat column)
+ranks_all <- results(dds, name = "condition_resistant_vs_parental") |> as.data.frame() |>
+  rownames_to_column("gene_id") |> left_join(gene_names, by = "gene_id") |>
+  filter(!is.na(stat), !is.na(gene_name)) |> group_by(gene_name) |>
+  slice_max(abs(stat), n = 1, with_ties = FALSE) |> ungroup()
+ranks <- deframe(select(ranks_all, gene_name, stat))
+
+gsea <- fgsea(hallmark, ranks) |> arrange(padj)
+write_csv(mutate(gsea, leadingEdge = map_chr(leadingEdge, paste, collapse = ";")),
+          "results/tables/GSEA_hallmark.csv")
+head(gsea[, c("pathway", "NES", "padj")], 15)
+```
+
+## 6. Interpretation
+
+_To write: which genes and pathways change consistently with tamoxifen resistance across the four cell lines (e.g. ER signalling, E2F/G2M proliferation, EMT), how this compares with the original study (PMID 30143015), and the limitations (one sample per cell line and condition, cell lines only)._
+
+```{r session}
+sessionInfo()
+```

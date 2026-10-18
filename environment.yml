@@ -1,0 +1,22 @@
+name: rnaseq-tamres
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.11
+  - pandas
+  - nextflow
+  - r-base=4.3
+  - r-rmarkdown
+  - r-here
+  - r-tidyverse
+  - r-pheatmap
+  - r-ggrepel
+  - r-msigdbr
+  - bioconductor-deseq2
+  - bioconductor-edger
+  - bioconductor-limma
+  - bioconductor-apeglm
+  - bioconductor-fgsea
+  - bioconductor-clusterprofiler
+  - bioconductor-org.hs.eg.db

@@ -1,0 +1,17 @@
+# Raw and intermediate data (re-create with scripts/)
+data/
+*.fastq.gz
+*.fq.gz
+*.bam
+*.bai
+work/
+.nextflow*
+results/nfcore/
+
+# R / Python
+.Rhistory
+.RData
+.Rproj.user/
+__pycache__/
+analysis/*_cache/
+analysis/*_files/

@@ -1,0 +1,9 @@
+# nf-core/rnaseq parameters (Salmon pseudo-alignment: fast, low memory)
+input: nextflow/samplesheet.csv
+outdir: results/nfcore
+fasta: https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_46/GRCh38.primary_assembly.genome.fa.gz
+gtf: https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_46/gencode.v46.primary_assembly.annotation.gtf.gz
+gencode: true
+pseudo_aligner: salmon
+skip_alignment: true
+save_reference: true
