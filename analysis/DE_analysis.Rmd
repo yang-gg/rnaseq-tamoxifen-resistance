@@ -126,13 +126,16 @@ ggsave("results/figures/volcano.png", p_vol, width = 6, height = 5)
 p_vol
 ```
 
-```{r heatmap}
+```{r heatmap, fig.width = 8, fig.height = 10}
 top <- head(sig$gene_id, 50)
-mat <- assay(vsd)[top, ]
+# Remove the cell-line baseline for display only, so the heatmap shows the resistance effect
+mat <- removeBatchEffect(assay(vsd), batch = vsd$cell_line,
+                         design = model.matrix(~ condition, data = info))[top, ]
 mat <- mat - rowMeans(mat)
 rownames(mat) <- gene_names$gene_name[match(rownames(mat), gene_names$gene_id)]
-ph <- pheatmap(mat, annotation_col = info[, c("cell_line", "condition")], silent = TRUE)
-ggsave("results/figures/top50_heatmap.png", ph$gtable, width = 7, height = 9)
+ph <- pheatmap(mat, annotation_col = info[, c("cell_line", "condition")],
+               labels_col = info$title, fontsize_row = 7, silent = TRUE)
+ggsave("results/figures/top50_heatmap.png", ph$gtable, width = 8, height = 10)
 ph
 ```
 
