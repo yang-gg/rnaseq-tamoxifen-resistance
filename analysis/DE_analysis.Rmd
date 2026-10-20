@@ -131,8 +131,9 @@ top <- head(sig$gene_id, 50)
 mat <- assay(vsd)[top, ]
 mat <- mat - rowMeans(mat)
 rownames(mat) <- gene_names$gene_name[match(rownames(mat), gene_names$gene_id)]
-pheatmap(mat, annotation_col = info[, c("cell_line", "condition")],
-         filename = "results/figures/top50_heatmap.png", width = 7, height = 9)
+ph <- pheatmap(mat, annotation_col = info[, c("cell_line", "condition")], silent = TRUE)
+ggsave("results/figures/top50_heatmap.png", ph$gtable, width = 7, height = 9)
+ph
 ```
 
 ## 4. Method comparison (edgeR, limma-voom)
