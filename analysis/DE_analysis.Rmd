@@ -30,12 +30,15 @@ library(tximport)
 
 # Sample annotation (from GEO) joined to SRA run accessions (from SRA Run Selector)
 samples <- read_csv("metadata/samples_geo.csv", show_col_types = FALSE)
-runs <- read_csv("metadata/SraRunTable.csv", show_col_types = FALSE) |>
-  select(run = Run, gsm = `Sample Name`)
+sra <- read_csv("metadata/SraRunTable.csv", show_col_types = FALSE)
+# The GSM column is named differently across SRA Run Selector exports, so find it by content
+gsm_col <- names(sra)[map_lgl(sra, \(x) all(str_detect(x, "^GSM[0-9]+$"), na.rm = TRUE) && any(!is.na(x)))][1]
+if (is.na(gsm_col)) stop("No GSM column in metadata/SraRunTable.csv. Columns: ", paste(names(sra), collapse = ", "))
+runs <- tibble(run = sra$Run, gsm = sra[[gsm_col]])
 info_runs <- inner_join(runs, samples, by = "gsm") |>
   mutate(condition = factor(condition, levels = c("parental", "resistant")),
          cell_line = factor(cell_line))
-stopifnot(n_distinct(info_runs$gsm) == 11)
+if (n_distinct(info_runs$gsm) != 11) stop("Expected 11 GEO samples, matched ", n_distinct(info_runs$gsm), ". Check metadata/SraRunTable.csv.")
 
 # One Salmon quant file per run, named by its SRR accession (e.g. data/salmon/SRRxxxxxxx.tabular)
 files <- list.files("data/salmon", pattern = "^SRR[0-9]+", full.names = TRUE)
