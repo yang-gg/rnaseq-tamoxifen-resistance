@@ -46,15 +46,35 @@ names(files) <- str_extract(basename(files), "^SRR[0-9]+")
 files <- files[info_runs$run]
 stopifnot(!anyNA(files))
 
-# GENCODE transcript names look like ENST...|ENSG...|...|tx_name|gene_name|length|biotype|
+# Map transcripts to genes from the GENCODE v46 FASTA headers:
+# >ENST...|ENSG...|OTTHUMG|OTTHUMT|tx_name|gene_name|length|biotype|
+tx2gene_file <- "data/tx2gene_gencode_v46.tsv"
+if (!file.exists(tx2gene_file)) {
+  fa <- "data/gencode.v46.transcripts.fa.gz"
+  if (!file.exists(fa)) {
+    options(timeout = 3600)
+    download.file("https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_46/gencode.v46.transcripts.fa.gz",
+                  fa, mode = "wb")
+  }
+  headers <- str_subset(read_lines(fa), "^>") |> str_remove("^>")
+  tibble(header = headers) |>
+    separate_wider_delim(header, "|", names = c("tx", "gene_id", NA, NA, NA, "gene_name"),
+                         too_many = "drop", cols_remove = FALSE) |>
+    write_tsv(tx2gene_file)
+}
+tx2gene <- read_tsv(tx2gene_file, show_col_types = FALSE)
+
+# Salmon names are either full headers (ENST...|ENSG...|...) or bare transcript IDs (--gencode)
 tx_names <- read_tsv(files[1], show_col_types = FALSE)$Name
-stopifnot(all(str_detect(tx_names, fixed("|"))))
-tx2gene <- tibble(tx = tx_names) |>
-  separate_wider_delim(tx, "|", names = c(NA, "gene_id", NA, NA, NA, "gene_name"),
-                       too_many = "drop", cols_remove = FALSE)
+key <- if (all(str_detect(tx_names, fixed("|")))) "header" else "tx"
+if (!all(str_detect(tx_names, fixed(".")))) tx2gene <- mutate(tx2gene, tx = str_remove(tx, "\\.[0-9]+$"))
+tx2gene <- tx2gene |> select(name = all_of(key), gene_id, gene_name)
+matched <- mean(tx_names %in% tx2gene$name)
+if (matched < 0.95) stop(sprintf("Only %.0f%% of Salmon transcript names match GENCODE v46, e.g. %s",
+                                 100 * matched, paste(head(tx_names, 3), collapse = ", ")))
 gene_names <- distinct(tx2gene, gene_id, gene_name)
 
-txi <- tximport(files, type = "salmon", tx2gene = select(tx2gene, tx, gene_id))
+txi <- tximport(files, type = "salmon", tx2gene = select(tx2gene, name, gene_id))
 info <- info_runs |> column_to_rownames("run")
 info |> select(gsm, title, cell_line, condition)
 ```
