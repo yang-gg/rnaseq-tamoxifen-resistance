@@ -41,14 +41,17 @@ _Coming soon: PCA, volcano plot, top genes, enriched pathways and interpretation
 
 ## Reproduce
 
-1. Run the Galaxy steps above and download one Salmon `quant.sf` per run into `data/salmon/`, named by SRA run accession (e.g. `data/salmon/SRRxxxxxxx.tabular`).
-2. Download the run table from the [SRA Run Selector](https://www.ncbi.nlm.nih.gov/Traces/study/?acc=SRP133519) to `metadata/SraRunTable.csv`.
-3. Install the R packages and render the report:
+1. Upstream: import `upstream_analysis_Galaxy/Galaxy-Workflow-GSE111151_bulk_RNASeq.ga` into [Galaxy Australia](https://usegalaxy.org.au) and run it on the SRA runs of SRP133519. Download one Salmon `quant.sf` per run into `data/salmon/`, named by SRA run accession (e.g. `data/salmon/SRRxxxxxxx.tabular`).
+2. Download the run table from the [SRA Run Selector](https://www.ncbi.nlm.nih.gov/Traces/study/?acc=SRP133519) to `metadata/SraRunTable.csv` (already included in this repository).
+3. Restore the R environment with [renv](https://rstudio.github.io/renv/) and render the report:
 
 ```bash
-Rscript scripts/install_packages.R
-Rscript -e 'rmarkdown::render("analysis/DE_analysis.Rmd")'
+Rscript -e "install.packages('renv')"
+Rscript -e "renv::restore()"
+Rscript -e "rmarkdown::render('analysis/DE_analysis.Rmd')"
 ```
+
+The first render downloads the GENCODE v46 transcript FASTA (about 70 MB) into `data/` to build the transcript-to-gene map.
 
 ## Limitations
 
@@ -58,8 +61,10 @@ Rscript -e 'rmarkdown::render("analysis/DE_analysis.Rmd")'
 ## Repository layout
 
 ```
-├── analysis/      R Markdown analysis
-├── metadata/      sample annotation (GEO) and run table (SRA)
-├── results/       figures and tables (raw data is not tracked)
-└── scripts/       package installation
+├── analysis/                  R Markdown analysis and rendered HTML report
+│   └── results/               figures and tables
+├── metadata/                  sample annotation (GEO) and run table (SRA)
+├── upstream_analysis_Galaxy/  Galaxy workflow and MultiQC report
+├── renv.lock                  R package versions
+└── scripts/                   package installation (alternative to renv)
 ```

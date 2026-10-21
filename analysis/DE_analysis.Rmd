@@ -17,8 +17,8 @@ library(pheatmap)
 library(ggrepel)
 library(fgsea)
 library(msigdbr)
-dir.create("results/figures", showWarnings = FALSE, recursive = TRUE)
-dir.create("results/tables", showWarnings = FALSE, recursive = TRUE)
+dir.create(here("analysis/results/figures"), showWarnings = FALSE, recursive = TRUE)
+dir.create(here("analysis/results/tables"), showWarnings = FALSE, recursive = TRUE)
 ```
 
 ## 1. Data
@@ -96,7 +96,7 @@ p_pca <- ggplot(pca, aes(PC1, PC2, colour = cell_line, shape = condition)) +
   geom_point(size = 3) +
   labs(x = paste0("PC1 (", pv[1], "%)"), y = paste0("PC2 (", pv[2], "%)")) +
   theme_bw()
-ggsave("results/figures/pca.png", p_pca, width = 6, height = 4.5)
+ggsave("analysis/results/figures/pca.png", p_pca, width = 6, height = 4.5)
 p_pca
 ```
 
@@ -109,7 +109,7 @@ dds <- DESeq(dds)
 res <- lfcShrink(dds, coef = "condition_resistant_vs_parental", type = "apeglm")
 res_tbl <- as.data.frame(res) |> rownames_to_column("gene_id") |>
   left_join(gene_names, by = "gene_id") |> arrange(padj)
-write_csv(res_tbl, "results/tables/DESeq2_resistant_vs_parental.csv")
+write_csv(res_tbl, "analysis/results/tables/DESeq2_resistant_vs_parental.csv")
 sig <- filter(res_tbl, padj < 0.05, abs(log2FoldChange) > 1)
 nrow(sig)
 ```
@@ -122,7 +122,7 @@ p_vol <- res_tbl |> filter(!is.na(padj)) |>
   geom_text_repel(data = ~ head(filter(.x, sig), 15), aes(label = gene_name), size = 3, colour = "black") +
   scale_colour_manual(values = c("grey70", "firebrick")) +
   theme_bw() + theme(legend.position = "none")
-ggsave("results/figures/volcano.png", p_vol, width = 6, height = 5)
+ggsave("analysis/results/figures/volcano.png", p_vol, width = 6, height = 5)
 p_vol
 ```
 
@@ -135,7 +135,7 @@ mat <- mat - rowMeans(mat)
 rownames(mat) <- gene_names$gene_name[match(rownames(mat), gene_names$gene_id)]
 ph <- pheatmap(mat, annotation_col = info[, c("cell_line", "condition")],
                labels_col = info$title, fontsize_row = 7, silent = TRUE)
-ggsave("results/figures/top50_heatmap.png", ph$gtable, width = 8, height = 10)
+ggsave("analysis/results/figures/top50_heatmap.png", ph$gtable, width = 8, height = 10)
 ph
 ```
 
@@ -144,7 +144,7 @@ ph
 ```{r compare}
 design <- model.matrix(~ cell_line + condition, data = info)
 y <- DGEList(counts(dds))
-y <- calcNormFactors(y)
+y <- normLibSizes(y)
 
 y <- estimateDisp(y, design)
 fit_e <- glmQLFit(y, design)
@@ -158,8 +158,20 @@ sets <- list(
   edgeR  = rownames(edger)[edger$FDR < 0.05 & abs(edger$logFC) > 1],
   limma  = rownames(limma_res)[limma_res$adj.P.Val < 0.05 & abs(limma_res$logFC) > 1]
 )
+write_csv(rownames_to_column(edger, "gene_id") |> left_join(gene_names, by = "gene_id"),
+          "analysis/results/tables/edgeR_resistant_vs_parental.csv")
+write_csv(rownames_to_column(limma_res, "gene_id") |> left_join(gene_names, by = "gene_id"),
+          "analysis/results/tables/limma_resistant_vs_parental.csv")
 sapply(sets, length)
-length(Reduce(intersect, sets))
+
+# Genes called by all three methods
+common <- tibble(gene_id = Reduce(intersect, sets)) |>
+  left_join(gene_names, by = "gene_id") |>
+  left_join(select(res_tbl, gene_id, DESeq2_log2FC = log2FoldChange, DESeq2_padj = padj), by = "gene_id") |>
+  left_join(rownames_to_column(edger, "gene_id") |> select(gene_id, edgeR_logFC = logFC, edgeR_FDR = FDR), by = "gene_id") |>
+  left_join(rownames_to_column(limma_res, "gene_id") |> select(gene_id, limma_logFC = logFC, limma_padj = adj.P.Val), by = "gene_id")
+write_csv(common, "analysis/results/tables/common_DE_genes.csv")
+knitr::kable(common, digits = 3)
 ```
 
 ## 5. Pathway analysis (GSEA, MSigDB Hallmark)
@@ -176,7 +188,7 @@ ranks <- deframe(select(ranks_all, gene_name, stat))
 
 gsea <- fgsea(hallmark, ranks) |> arrange(padj)
 write_csv(mutate(gsea, leadingEdge = map_chr(leadingEdge, paste, collapse = ";")),
-          "results/tables/GSEA_hallmark.csv")
+          "analysis/results/tables/GSEA_hallmark.csv")
 head(gsea[, c("pathway", "NES", "padj")], 15)
 ```
 
