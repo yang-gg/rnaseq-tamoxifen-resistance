@@ -9,7 +9,7 @@ output:
 Does the cell-line resistance signature (`DE_analysis.Rmd`) predict outcome in patients?
 
 - **Tamoxifen-treated:** [GSE17705](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE17705), 298 ER+ patients given adjuvant tamoxifen for 5 years (Symmans et al. 2010).
-- **No endocrine therapy:** [GSE2034](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE2034), lymph-node-negative patients who received no adjuvant systemic therapy (Wang et al. 2005); ER+ patients only.
+- **No endocrine therapy:** [GSE2034](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE2034), lymph-node-negative patients who received no adjuvant systemic therapy (Wang et al. 2005); ER+ patients only, outcome distant metastasis-free survival.
 
 Both cohorts use the same Affymetrix HG-U133A array (GPL96). If a high score predicts relapse after tamoxifen but not without treatment, the signature reflects tamoxifen resistance rather than general prognosis.
 
@@ -36,9 +36,11 @@ c(up = length(up), down = length(down))
 
 ## 2. Load cohorts
 
-Clinical columns differ between GEO series, so they are found by name and content. The table after this chunk shows which columns were used; check it.
+GSE17705 is read from GEO; its clinical columns are found by name and content. GEO's GSE2034 record holds only bone relapse, so its full clinical data (ER status, distant metastasis-free survival, treatment) come from the Bioconductor package [breastCancerVDX](https://bioconductor.org/packages/breastCancerVDX/), which packages the same arrays. The table after this chunk shows which columns were used; check it.
 
 ```{r functions}
+library(breastCancerVDX)
+
 # First characteristics column whose name matches `pattern` (and not `exclude`) and whose values pass `ok`
 find_col <- function(pd, pattern, ok, exclude = "^$") {
   cols <- names(pd)[str_detect(names(pd), regex(pattern, ignore_case = TRUE)) &
@@ -49,36 +51,43 @@ find_col <- function(pd, pattern, ok, exclude = "^$") {
 is_num <- \(x) mean(!is.na(suppressWarnings(as.numeric(x)))) > 0.8
 is_01 <- \(x) all(na.omit(x) %in% c("0", "1"))
 
-load_cohort <- function(gse, er_filter) {
+# Probe -> gene symbol; keep uniquely mapped probes, then the probe with the highest mean per gene
+collapse_probes <- function(x, sym) {
+  if (max(x, na.rm = TRUE) > 100) x <- log2(pmax(x, 1))  # MAS5 values come unlogged
+  keep <- !is.na(sym) & sym != "" & !str_detect(sym, "///")
+  x <- x[keep, ]; sym <- sym[keep]
+  best <- tapply(seq_along(sym), sym, \(i) i[which.max(rowMeans(x[i, , drop = FALSE]))])
+  x <- x[unlist(best), ]
+  rownames(x) <- names(best)
+  x
+}
+
+load_geo <- function(gse) {
   eset <- getGEO(gse, destdir = "data/geo", GSEMatrix = TRUE, getGPL = TRUE)[[1]]
   pd <- pData(eset)
   time_col <- find_col(pd, "time|year|month|follow|surv", \(x) is_num(x) && !is_01(x))
   event_col <- find_col(pd, "relapse|event|recur|status|rfs", is_01, exclude = "time|year|month|bone")
-  er_col <- if (er_filter) find_col(pd, "^er[ _.]|er.?status|estrogen", \(x) n_distinct(na.omit(x)) <= 3) else NA
-  if (is.na(time_col) || is.na(event_col) || (er_filter && is.na(er_col)))
-    stop(gse, ": could not find time/event/ER columns. Characteristics: ",
+  if (is.na(time_col) || is.na(event_col))
+    stop(gse, ": could not find time/event columns. Characteristics: ",
          paste(grep(":ch1$", names(pd), value = TRUE), collapse = " | "))
   years <- as.numeric(pd[[time_col]]) / if (str_detect(time_col, regex("month", ignore_case = TRUE))) 12 else 1
-  clin <- tibble(sample = rownames(pd), years = years, event = as.integer(pd[[event_col]]),
-                 er = if (er_filter) pd[[er_col]] else "ER+")
-  if (er_filter) clin <- filter(clin, str_detect(er, regex("^(1|p|pos|positive|er\\+|\\+)$", ignore_case = TRUE)))
-
-  # Probe -> gene symbol; keep uniquely mapped probes, then the probe with the highest mean per gene
-  x <- exprs(eset)
-  if (max(x, na.rm = TRUE) > 100) x <- log2(pmax(x, 1))  # MAS5 values come unlogged
-  sym <- fData(eset)[["Gene Symbol"]]
-  keep <- !is.na(sym) & sym != "" & !str_detect(sym, "///")
-  x <- x[keep, ]; sym <- sym[keep]
-  best <- tapply(seq_along(sym), sym, \(i) i[which.max(rowMeans(x[i, , drop = FALSE]))])
-  x <- x[unlist(best), clin$sample]
-  rownames(x) <- names(best)
-
-  list(clin = clin, expr = x,
-       used = tibble(cohort = gse, time = time_col, event = event_col, er = er_col, n = nrow(clin)))
+  clin <- tibble(sample = rownames(pd), years = years, event = as.integer(pd[[event_col]]))
+  list(clin = clin, expr = collapse_probes(exprs(eset), fData(eset)[["Gene Symbol"]])[, clin$sample],
+       used = tibble(cohort = gse, time = time_col, event = event_col, filter = "none", n = nrow(clin)))
 }
 
-cohorts <- list(`GSE17705 (tamoxifen)` = load_cohort("GSE17705", er_filter = FALSE),
-                `GSE2034 (no endocrine therapy)` = load_cohort("GSE2034", er_filter = TRUE))
+load_vdx <- function() {
+  data(vdx, package = "breastCancerVDX")
+  # VDX also contains ER- tumours from GSE5327; ER+ and untreated leaves the GSE2034 ER+ patients
+  pd <- pData(vdx) |> filter(er == 1, treatment == 0, !is.na(t.dmfs), !is.na(e.dmfs))
+  clin <- tibble(sample = rownames(pd), years = pd$t.dmfs / 365.25, event = as.integer(pd$e.dmfs))
+  list(clin = clin, expr = collapse_probes(exprs(vdx), fData(vdx)$Gene.symbol)[, clin$sample],
+       used = tibble(cohort = "GSE2034 (breastCancerVDX)", time = "t.dmfs (days)", event = "e.dmfs",
+                     filter = "er == 1, treatment == 0", n = nrow(clin)))
+}
+
+cohorts <- list(`GSE17705 (tamoxifen)` = load_geo("GSE17705"),
+                `GSE2034 (no endocrine therapy)` = load_vdx())
 knitr::kable(map_dfr(cohorts, "used"))
 ```
 
@@ -121,7 +130,7 @@ km_plot <- function() {
   par(mfrow = c(1, 2))
   iwalk(scored, \(d, name) {
     plot(survfit(Surv(years, event) ~ group, data = d), col = c("steelblue", "firebrick"), lwd = 2,
-         xlab = "Years", ylab = "Relapse-free", main = name)
+         xlab = "Years", ylab = "Distant relapse-free", main = name)
     legend("bottomleft", c("Low score", "High score"), col = c("steelblue", "firebrick"), lwd = 2, bty = "n")
   })
 }

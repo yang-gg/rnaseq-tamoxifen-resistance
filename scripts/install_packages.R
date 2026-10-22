@@ -3,4 +3,4 @@
 options(repos = c(CRAN = "https://cloud.r-project.org"))
 if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
 install.packages(c("tidyverse", "here", "rmarkdown", "pheatmap", "ggrepel", "msigdbr", "languageserver"))
-BiocManager::install(c("DESeq2", "edgeR", "limma", "apeglm", "fgsea", "tximport", "GEOquery"), update = FALSE, ask = FALSE)
+BiocManager::install(c("DESeq2", "edgeR", "limma", "apeglm", "fgsea", "tximport", "GEOquery", "breastCancerVDX"), update = FALSE, ask = FALSE)
