@@ -1,0 +1,139 @@
+---
+title: "Patient validation of the tamoxifen-resistance signature"
+output:
+  html_document:
+    toc: true
+    code_folding: hide
+---
+
+Does the cell-line resistance signature (`DE_analysis.Rmd`) predict outcome in patients?
+
+- **Tamoxifen-treated:** [GSE17705](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE17705), 298 ER+ patients given adjuvant tamoxifen for 5 years (Symmans et al. 2010).
+- **No endocrine therapy:** [GSE2034](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE2034), lymph-node-negative patients who received no adjuvant systemic therapy (Wang et al. 2005); ER+ patients only.
+
+Both cohorts use the same Affymetrix HG-U133A array (GPL96). If a high score predicts relapse after tamoxifen but not without treatment, the signature reflects tamoxifen resistance rather than general prognosis.
+
+```{r setup, message=FALSE}
+knitr::opts_knit$set(root.dir = here::here())
+library(tidyverse)
+library(here)
+library(GEOquery)
+library(survival)
+dir.create(here("data/geo"), showWarnings = FALSE, recursive = TRUE)
+dir.create(here("analysis/results/figures"), showWarnings = FALSE, recursive = TRUE)
+dir.create(here("analysis/results/tables"), showWarnings = FALSE, recursive = TRUE)
+```
+
+## 1. Signature
+
+```{r signature}
+deg <- read_csv("analysis/results/tables/DESeq2_resistant_vs_parental.csv", show_col_types = FALSE) |>
+  filter(padj < 0.05, abs(log2FoldChange) > 1, !is.na(gene_name))
+up <- deg$gene_name[deg$log2FoldChange > 0]
+down <- deg$gene_name[deg$log2FoldChange < 0]
+c(up = length(up), down = length(down))
+```
+
+## 2. Load cohorts
+
+Clinical columns differ between GEO series, so they are found by name and content. The table after this chunk shows which columns were used; check it.
+
+```{r functions}
+# First characteristics column whose name matches `pattern` (and not `exclude`) and whose values pass `ok`
+find_col <- function(pd, pattern, ok, exclude = "^$") {
+  cols <- names(pd)[str_detect(names(pd), regex(pattern, ignore_case = TRUE)) &
+                      !str_detect(names(pd), regex(exclude, ignore_case = TRUE)) &
+                      str_detect(names(pd), ":ch1$")]
+  cols[map_lgl(cols, \(x) ok(pd[[x]]))][1]
+}
+is_num <- \(x) mean(!is.na(suppressWarnings(as.numeric(x)))) > 0.8
+is_01 <- \(x) all(na.omit(x) %in% c("0", "1"))
+
+load_cohort <- function(gse, er_filter) {
+  eset <- getGEO(gse, destdir = "data/geo", GSEMatrix = TRUE, getGPL = TRUE)[[1]]
+  pd <- pData(eset)
+  time_col <- find_col(pd, "time|year|month|follow|surv", \(x) is_num(x) && !is_01(x))
+  event_col <- find_col(pd, "relapse|event|recur|status|rfs", is_01, exclude = "time|year|month|bone")
+  er_col <- if (er_filter) find_col(pd, "^er[ _.]|er.?status|estrogen", \(x) n_distinct(na.omit(x)) <= 3) else NA
+  if (is.na(time_col) || is.na(event_col) || (er_filter && is.na(er_col)))
+    stop(gse, ": could not find time/event/ER columns. Characteristics: ",
+         paste(grep(":ch1$", names(pd), value = TRUE), collapse = " | "))
+  years <- as.numeric(pd[[time_col]]) / if (str_detect(time_col, regex("month", ignore_case = TRUE))) 12 else 1
+  clin <- tibble(sample = rownames(pd), years = years, event = as.integer(pd[[event_col]]),
+                 er = if (er_filter) pd[[er_col]] else "ER+")
+  if (er_filter) clin <- filter(clin, str_detect(er, regex("^(1|p|pos|positive|er\\+|\\+)$", ignore_case = TRUE)))
+
+  # Probe -> gene symbol; keep uniquely mapped probes, then the probe with the highest mean per gene
+  x <- exprs(eset)
+  if (max(x, na.rm = TRUE) > 100) x <- log2(pmax(x, 1))  # MAS5 values come unlogged
+  sym <- fData(eset)[["Gene Symbol"]]
+  keep <- !is.na(sym) & sym != "" & !str_detect(sym, "///")
+  x <- x[keep, ]; sym <- sym[keep]
+  best <- tapply(seq_along(sym), sym, \(i) i[which.max(rowMeans(x[i, , drop = FALSE]))])
+  x <- x[unlist(best), clin$sample]
+  rownames(x) <- names(best)
+
+  list(clin = clin, expr = x,
+       used = tibble(cohort = gse, time = time_col, event = event_col, er = er_col, n = nrow(clin)))
+}
+
+cohorts <- list(`GSE17705 (tamoxifen)` = load_cohort("GSE17705", er_filter = FALSE),
+                `GSE2034 (no endocrine therapy)` = load_cohort("GSE2034", er_filter = TRUE))
+knitr::kable(map_dfr(cohorts, "used"))
+```
+
+## 3. Resistance score
+
+Each gene is z-scored across patients within a cohort. The score is the mean z of the up genes minus the mean z of the down genes, so a higher score means a more resistant-like tumour. Follow-up is censored at 10 years so both cohorts cover the same window.
+
+```{r score}
+score_cohort <- function(co) {
+  z <- t(scale(t(co$expr)))
+  co$clin |>
+    mutate(score = colMeans(z[intersect(up, rownames(z)), , drop = FALSE]) -
+                   colMeans(z[intersect(down, rownames(z)), , drop = FALSE]),
+           event = if_else(years > 10, 0L, event),
+           years = pmin(years, 10),
+           group = factor(if_else(score > median(score), "High", "Low"), levels = c("Low", "High")))
+}
+scored <- map(cohorts, score_cohort)
+map_dfr(cohorts, \(co) tibble(up_on_array = sum(up %in% rownames(co$expr)),
+                              down_on_array = sum(down %in% rownames(co$expr))), .id = "cohort") |>
+  knitr::kable()
+```
+
+## 4. Survival
+
+Cox model with the score per standard deviation, and Kaplan-Meier curves split at the median score.
+
+```{r survival, fig.width = 10, fig.height = 5}
+cox_tbl <- imap_dfr(scored, \(d, name) {
+  fit <- summary(coxph(Surv(years, event) ~ scale(score), data = d))
+  tibble(cohort = name, n = nrow(d), events = sum(d$event),
+         HR_per_SD = fit$conf.int[1, 1], lower95 = fit$conf.int[1, 3], upper95 = fit$conf.int[1, 4],
+         p = fit$coefficients[1, 5],
+         logrank_p = 1 - pchisq(survdiff(Surv(years, event) ~ group, data = d)$chisq, 1))
+})
+write_csv(cox_tbl, "analysis/results/tables/patient_validation_cox.csv")
+knitr::kable(cox_tbl, digits = 3)
+
+km_plot <- function() {
+  par(mfrow = c(1, 2))
+  iwalk(scored, \(d, name) {
+    plot(survfit(Surv(years, event) ~ group, data = d), col = c("steelblue", "firebrick"), lwd = 2,
+         xlab = "Years", ylab = "Relapse-free", main = name)
+    legend("bottomleft", c("Low score", "High score"), col = c("steelblue", "firebrick"), lwd = 2, bty = "n")
+  })
+}
+png("analysis/results/figures/patient_validation_km.png", width = 10, height = 5, units = "in", res = 150)
+km_plot(); invisible(dev.off())
+km_plot()
+```
+
+## 5. Interpretation
+
+_To write after running: compare the hazard ratio in the tamoxifen cohort with the untreated cohort._
+
+```{r session}
+sessionInfo()
+```
