@@ -1,7 +1,5 @@
 # Transcriptomic signatures of tamoxifen resistance in ER+ breast cancer
 
-> 🚧 Work in progress / 进行中
-
 ## Question
 
 Which genes and pathways change consistently when ER-positive breast cancer cells become resistant to tamoxifen, across several independent cell lines?
