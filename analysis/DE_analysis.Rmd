@@ -194,7 +194,34 @@ head(gsea[, c("pathway", "NES", "padj")], 15)
 
 ## 6. Interpretation
 
-_To write: which genes and pathways change consistently with tamoxifen resistance across the four cell lines (e.g. ER signalling, E2F/G2M proliferation, EMT), how this compares with the original study (PMID 30143015), and the limitations (one sample per cell line and condition, cell lines only)._
+### Cell line dominates, so the design is paired
+
+On PCA, the four cell lines separate clearly (PC1 40%, PC2 33%), and each resistant derivative sits next to its parental line. Baseline differences between cell lines are much larger than the effect of resistance, so a naive resistant-vs-parental comparison would be swamped. Modelling `~ cell_line + condition` compares each resistant line with its own parent and pools the shared change across the four backgrounds.
+
+### Shared differentially expressed genes
+
+DESeq2 identified 134 genes (padj < 0.05, |log2FC| > 1; 95 up, 39 down) that change consistently with tamoxifen resistance across cell lines.
+
+- **Down in resistant cells: loss of ER signalling.** Several classic estrogen receptor targets fall, including PGR-AS1 (log2FC -2.3), AREG (-2.6), SGK3 (-1.3), CISH (-1.7) and CCDC170 (-1.7), which sits next to ESR1. The cholesterol efflux pump ABCA1 is also down (-2.6).
+- **Up in resistant cells: hypoxia, mesenchymal and immune programmes.** The most significant gene is EPAS1 (HIF-2a; log2FC 1.6, padj 8e-12). SLIT1 shows the largest change (+4.6). LRP1, LAMB3 and several MHC genes (HLA-DQB1, HLA-DRB6, HLA-F) are also up.
+
+### Pathways (GSEA, MSigDB Hallmark)
+
+- **Down:** ESTROGEN_RESPONSE_EARLY (NES -1.84; leading edge includes PGR, GREB1, AREG, BCL2, IGF1R), MYC_TARGETS_V1 (-2.14), E2F_TARGETS (-1.92) and OXIDATIVE_PHOSPHORYLATION (-1.64). Resistant cells rely less on estrogen-driven growth and show reduced proliferative and mitochondrial programmes.
+- **Up:** EPITHELIAL_MESENCHYMAL_TRANSITION is the strongest signal (NES 2.47, padj 3e-12), followed by CHOLESTEROL_HOMEOSTASIS (2.19), ANGIOGENESIS (2.19), HEDGEHOG_SIGNALING (2.06), TNFA_SIGNALING_VIA_NFKB (1.89), INFLAMMATORY_RESPONSE (1.83) and HYPOXIA (1.76).
+
+Together these point to a shared resistant state: reduced dependence on ER signalling, higher migratory capacity, slower proliferation, and a shift towards a mesenchymal, inflammatory and hypoxia-like phenotype, all of which have been linked to endocrine resistance.
+
+### Comparison with the original study
+
+Hultsch et al. (BMC Cancer 2018, PMID 30143015) analysed each resistant line separately and reported no differentially expressed genes shared by all lines. Their main finding was lipid reprogramming, including down-regulation of ABCA1, and LRP1 was one of five genes changing concordantly in the luminal A lines. The paired analysis here identifies a common resistance signature behind that heterogeneity (across different cell lines) and reproduces their key observations: CHOLESTEROL_HOMEOSTASIS is enriched, ABCA1 is down and LRP1 is up.
+
+### Limitations
+
+1. **Method sensitivity differs.** edgeR (quasi-likelihood) called 8 genes and limma-voom 14; only 2 genes were called by all three methods (see `common_DE_genes.csv`). With 11 samples and 5 model coefficients there are 6 residual degrees of freedom, and edgeR QL and limma are more conservative than the DESeq2 Wald test in this setting. The 134 DESeq2 genes should be treated as candidates; the rank-based pathway results are more robust.
+2. **No replicates within a condition.** Each cell line contributes one parental and one or two resistant libraries, so the cell lines act as biological replicates.
+3. **Cell-line models only.** BT-474 is HER2-positive (luminal B) whereas the other three are luminal A, and none of the findings has yet been tested in patient tumours.
+4. **Transcript level only.** No protein or functional validation.
 
 ```{r session}
 sessionInfo()

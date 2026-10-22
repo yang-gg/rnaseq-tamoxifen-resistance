@@ -37,7 +37,21 @@ Which genes and pathways change consistently when ER-positive breast cancer cell
 
 ## Results
 
-_Coming soon: PCA, volcano plot, top genes, enriched pathways and interpretation._
+![PCA](analysis/results/figures/pca.png)
+
+Cell line explains most of the variation, so differential expression uses a paired design (`~ cell_line + condition`).
+
+![Top 50 genes heatmap](analysis/results/figures/top50_heatmap.png)
+
+**Key findings**
+
+- **134 genes** change consistently with tamoxifen resistance across four ER+ cell lines (DESeq2, padj < 0.05, |log2FC| > 1).
+- **Loss of ER signalling:** classic ER targets (PGR-AS1, AREG, SGK3, CISH) are down, and the Hallmark early estrogen response is depleted (NES -1.84).
+- **Reduced proliferation:** MYC and E2F target programmes are down.
+- **Mesenchymal, inflammatory and hypoxic shift:** EMT is the most enriched pathway (NES 2.47); TNFa/NF-kB, hypoxia and angiogenesis are also up, and HIF-2a (EPAS1) is the top gene.
+- **Agrees with the original study:** cholesterol homeostasis is enriched, ABCA1 is down and LRP1 is up, matching the lipid reprogramming reported by Hultsch et al. (2018), while the paired design reveals a shared signature that the per-line analysis did not.
+
+edgeR and limma-voom are more conservative here (8 and 14 genes), so the DESeq2 list is treated as candidates and pathway-level results as the main conclusion. Full results: the HTML report ([analysis/DE_analysis.html](analysis/DE_analysis.html)) and tables ([analysis/results/tables/](analysis/results/tables/)).
 
 ## Reproduce
 
